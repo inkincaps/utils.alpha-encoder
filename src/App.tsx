@@ -1,12 +1,9 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-
+import { Command } from '@tauri-apps/plugin-shell';
 import "./App.css";
 import PixelCard from "./components/PixelCard/PixelCard";
 import { FileDown } from "lucide-react";
 import SplashCursor from "./components/SplashCursor/SplashCursor";
-
 interface DroppedFile {
   name: string;
   path: string;
@@ -15,21 +12,15 @@ interface DroppedFile {
 function App() {
   const [files, setFiles] = useState<DroppedFile[]>([]);
   const [processing, setProcessing] = useState(false);
- useEffect( () => {
-
-
- ( async () => {const unlisten = await getCurrentWebview().onDragDropEvent((event) => {
-    if (event.payload.type === 'over') {
-      // console.log('User hovering', event.payload.position);
-    } else if (event.payload.type === 'drop') {
-      console.log('User dropped', event);
-    } else {
-      console.log('File drop cancelled');
-    }
-   });
-   return () => {
-     unlisten();
-   }
+  useEffect( () => {
+    ( async () => {
+      setTimeout(async() => {
+        const command = Command.sidecar('binaries/ffmpeg', ["-version"]);
+  const output = await command.execute();
+  console.log("ro",output);
+      }, 1000);
+      
+  
    // you need to call unlisten if your handler goes out of scope e.g. the component is unmounted
   //  unlisten();
  } )()
@@ -42,16 +33,16 @@ function App() {
       name: file.name,
       path: (file as any).path // Tauri adds the path property to the File object
     }));
-    
+    console.log(droppedFiles)
     setFiles(tauriFiles);
     
     try {
       setProcessing(true);
       
-      // We'll need to implement this Rust command in src-tauri/src/main.rs
-      await invoke("process_video", {
-        filePaths: tauriFiles.map(f => f.path)
-      });
+      // // We'll need to implement this Rust command in src-tauri/src/main.rs
+      // await invoke("process_video", {
+      //   filePaths: tauriFiles.map(f => f.path)
+      // });
       
       setProcessing(false);
     } catch (error) {

@@ -4,4 +4,3 @@
 fn main() {
     ghostencode_lib::run()
 }
-
