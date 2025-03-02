@@ -12,11 +12,14 @@
   "app": {
     "windows": [
       {
-        "title": "ghostencode",
+        "title": "Ghostencode - transparency encoder",
         "width": 500,
-        "height": 400,
+        "height": 380,
         "dragDropEnabled": true,
         "resizable": false,
+        "fullscreen": false,
+        "transparent": true,
+     "maximizable": false,
        "center": true,
        "decorations": true,
        "hiddenTitle": true
@@ -27,6 +30,11 @@
     }
   },
   "bundle": {
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    },
     "active": true,
     "targets": "all",
     "icon": [

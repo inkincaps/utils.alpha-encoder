@@ -11,6 +11,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { generalLoadingMessages } from "./utils/progress-copy";
 import Lottie from "lottie-react";
 import SuccessAnimation from "./components/success";
+import { delay } from "./utils";
 
 interface DroppedFile {
   name: string;
@@ -22,7 +23,7 @@ function App() {
   const [processing, setProcessing] = useState<"unprocessed" | "processing" | "processed">('unprocessed');
   let randomIndex = Math.floor(Math.random() * generalLoadingMessages.length);
   const [processingCopy, setProcessingCopy] = useState(generalLoadingMessages[randomIndex]);
-
+  const [processed, setProccessed] = useState(0);
   useEffect(() => {
     if (processing == "processing") {
       const interval = setInterval(() => {
@@ -43,7 +44,8 @@ function App() {
 
   listen('ffmpeg-terminated', (event: any) => {
     console.log('Processing completed with code:', event);
-    setProcessing("processed");
+    setProccessed(processed + 1);
+    console.log("Processing completed", processed)
   });
 
   useEffect(() => {
@@ -57,7 +59,6 @@ function App() {
             path: file
           }));
           setFiles(tauriFiles);
-          // invoke('process_ffmpeg', { inputPath: tauriFiles[0].path, args: ['-c:v', 'libvpx-vp9', '-b:v', '1M', '-c:a', 'libopus', tauriFiles[0].path.substring(0, tauriFiles[0].path.length - 4) + "-chrome.webm"] });
           invoke('process_ffmpeg', { inputPath: tauriFiles[0].path, args: ['-c:v', 'libx265', '-pix_fmt', 'yuva420p', '-x265-params', 'alpha=1', '-tag:v', 'hvc1', tauriFiles[0].path.substring(0, tauriFiles[0].path.length - 4) + "-safari.mp4"] });
           console.log('User dropped', event.payload.paths);
         } else {
@@ -67,6 +68,21 @@ function App() {
       return () => unlisten();
     })()
   }, [])
+
+
+  useEffect(() => {
+    if (processed == 1) {
+      invoke('process_ffmpeg', { inputPath: files[0].path, args: ['-c:v', 'libvpx-vp9', '-b:v', '1M', '-c:a', 'libopus', files[0].path.substring(0, files[0].path.length - 4) + "-chrome.webm"] });
+    }
+    if (processed == 2) {
+      setProcessing("processed");
+      delay(3000).then(() => {
+        setProcessing("unprocessed");
+        setProccessed(0);
+        setFiles([]);
+      })
+    }
+  }, [processed])
 
 
   return (

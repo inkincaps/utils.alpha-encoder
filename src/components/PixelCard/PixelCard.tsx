@@ -174,7 +174,6 @@ interface VariantConfig {
   speed: number;
   colors: string;
   noFocus: boolean;
-  active: boolean;
 }
 
 export default function PixelCard({
