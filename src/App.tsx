@@ -29,13 +29,9 @@ function App() {
         const randomIndex = Math.floor(Math.random() * generalLoadingMessages.length);
         setProcessingCopy(generalLoadingMessages[randomIndex]);
       }, 5000);
-
       return () => clearInterval(interval);
-
     }
   }, [processing])
-
-
 
   listen('ffmpeg-output', (event: any) => {
     console.log('FFmpeg output:', event.payload.line);
@@ -45,11 +41,11 @@ function App() {
     console.log('FFmpeg output:', event.payload.line);
   });
 
-
   listen('ffmpeg-terminated', (event: any) => {
     console.log('Processing completed with code:', event);
     setProcessing("processed");
   });
+
   useEffect(() => {
     (async () => {
       const unlisten = await getCurrentWebview().onDragDropEvent((event) => {
@@ -61,8 +57,8 @@ function App() {
             path: file
           }));
           setFiles(tauriFiles);
-          invoke('process_ffmpeg', { inputPath: tauriFiles[0].path, args: [tauriFiles[0].path + "chrome.webm"] });
-          invoke('process_ffmpeg', { inputPath: tauriFiles[0].path, args: [tauriFiles[0].path + "safari.mp4"] });
+          // invoke('process_ffmpeg', { inputPath: tauriFiles[0].path, args: ['-c:v', 'libvpx-vp9', '-b:v', '1M', '-c:a', 'libopus', tauriFiles[0].path.substring(0, tauriFiles[0].path.length - 4) + "-chrome.webm"] });
+          invoke('process_ffmpeg', { inputPath: tauriFiles[0].path, args: ['-c:v', 'libx265', '-pix_fmt', 'yuva420p', '-x265-params', 'alpha=1', '-tag:v', 'hvc1', tauriFiles[0].path.substring(0, tauriFiles[0].path.length - 4) + "-safari.mp4"] });
           console.log('User dropped', event.payload.paths);
         } else {
           console.log('File drop cancelled');

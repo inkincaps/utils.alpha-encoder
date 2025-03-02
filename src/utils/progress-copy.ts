@@ -23,7 +23,9 @@ const hevcLoadingMessages = [
     "Teaching HEVC the art of elegant compression...",
     "Preparing your pixels for their Apple debut...",
     "Making your video look gorgeous on Safari...",
-    "Final touches for Apple excellence..."
+    "Final touches for Apple excellence...",
+    "Teaching math to rebellious algorithms...",
+    "Decorating the loading screen with digital confetti..."
 ];
 
 // Additional general loading messages (from our earlier sets)
