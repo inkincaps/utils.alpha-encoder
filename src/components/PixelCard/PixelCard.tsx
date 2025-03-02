@@ -165,6 +165,7 @@ interface PixelCardProps {
   className?: string;
   children: React.ReactNode;
   onFilesDrop?: (files: File[]) => void;
+  active: boolean
 }
 
 interface VariantConfig {
@@ -173,6 +174,7 @@ interface VariantConfig {
   speed: number;
   colors: string;
   noFocus: boolean;
+  active: boolean;
 }
 
 export default function PixelCard({
@@ -183,6 +185,7 @@ export default function PixelCard({
   noFocus,
   className = "",
   children,
+  active,
   onFilesDrop,
 }: PixelCardProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -242,6 +245,16 @@ export default function PixelCard({
     pixelsRef.current = pxs;
   };
 
+  useEffect(() => {
+    if (active) {
+      handleAnimation("appear")
+    } else {
+      handleAnimation("disappear")
+    }
+
+
+  }, [active])
+
   const doAnimate = (fnName: keyof Pixel) => {
     animationRef.current = requestAnimationFrame(() => doAnimate(fnName));
     const timeNow = performance.now();
@@ -300,12 +313,12 @@ export default function PixelCard({
 
   const onMouseEnter = () => {
     // handleAnimation("appear");
-  
+
   }
   const onMouseLeave = () => {
-    
+
     // handleAnimation("disappear")
-  
+
   };
   const onFocus: React.FocusEventHandler<HTMLDivElement> = (e) => {
     if (e.currentTarget.contains(e.relatedTarget)) return;
@@ -334,9 +347,8 @@ export default function PixelCard({
   return (
     <div
       ref={containerRef}
-      className={`h-[400px] w-[300px] relative overflow-hidden grid place-items-center aspect-[4/5] border border-[#27272a] rounded-[25px] isolate transition-colors duration-200 ease-[cubic-bezier(0.5,1,0.89,1)] select-none ${className} ${
-        isDragging ? "border-2 border-dashed border-blue-500" : ""
-      }`}
+      className={`h-[490px] w-[300px] relative overflow-hidden grid place-items-center aspect-[4] border border-[#27272a] rounded-[25px] isolate transition-colors duration-200 ease-[cubic-bezier(0.5,1,0.89,1)] select-none ${className} ${isDragging ? "border-2 border-dashed border-blue-500" : ""
+        }`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}

@@ -15,7 +15,7 @@
         "title": "ghostencode",
         "width": 500,
         "height": 400,
-        "dragDropEnabled": false,
+        "dragDropEnabled": true,
         "resizable": false,
        "center": true,
        "decorations": true,
