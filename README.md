@@ -45,12 +45,13 @@ Designers usually export **ProRes 4444** from After Effects, Premiere, Final Cut
 
 ## What it does
 
-1. You drop a video on the window.
-2. The app runs the bundled FFmpeg **twice**, one encode after the other:
-   - `<name>-safari.mp4`: HEVC with an alpha layer (`libx265`, `yuva420p`, `alpha=1`, tag `hvc1`)
-   - `<name>-chrome.webm`: VP9 at 1 Mbps with Opus audio (`libvpx-vp9`, `libopus`). Alpha carries over automatically when the source has one.
-3. Both files are written **next to the original**.
-4. While it works you get a pixel-shimmer background, a loading animation and rotating messages like *"Negotiating peace talks between competing codecs…"*. A check mark shows when both files are done, then the window resets for the next drop.
+1. You drop one or more videos on the window.
+2. Each file is queued, and the bundled FFmpeg encodes it **twice**, one encode after the other:
+   - `<name>-safari.mp4`: HEVC with an alpha layer, tagged `hvc1` (Apple VideoToolbox on macOS, `libx265` elsewhere)
+   - `<name>-chrome.webm`: VP9 with alpha (`yuva420p`) at 1 Mbps, with Opus audio
+3. Both files are written **next to the original**, overwriting outputs from an earlier run.
+4. Each file shows a live progress bar, and you get the pixel-shimmer background plus rotating messages like *"Negotiating peace talks between competing codecs…"*.
+5. When the batch is done you see how many files succeeded, FFmpeg's error for any that failed, and a folder button that reveals the outputs in Finder / Explorer. Drop more files to start again.
 
 Everything runs locally. Nothing is uploaded.
 
@@ -130,10 +131,11 @@ chmod +x src-tauri/binaries/ffmpeg-aarch64-apple-darwin
 
 **Your FFmpeg must include:**
 
-- `libx265` built from **x265 4.0 or newer**. Alpha-channel HEVC (`-x265-params alpha=1`) arrived in x265 4.0 and FFmpeg 7.1. Older builds fail on the Safari encode.
-- `libvpx` (VP9) and `libopus`.
+- **macOS:** `hevc_videotoolbox` (every macOS FFmpeg build has it, Homebrew's included).
+- **Windows / Linux:** `libx265` from **x265 4.0 or newer, built with alpha support** (`ENABLE_ALPHA`), with FFmpeg 7.1+. Many distro builds lack this and fail with *"Loaded libx265 does not support alpha layer encoding"*.
+- **Everywhere:** `libvpx` (VP9) and `libopus`.
 
-Check with `ffmpeg -hide_banner -encoders | grep -E "libx265|libvpx-vp9|libopus"`.
+Check with `ffmpeg -hide_banner -encoders | grep -E "hevc_videotoolbox|libx265|libvpx-vp9|libopus"`.
 
 > **Licensing note:** `libx265` is GPL. If you distribute installers that bundle a GPL build of FFmpeg, you take on GPL obligations for that binary.
 
@@ -153,57 +155,76 @@ Builds only target the OS you build on, and the matching FFmpeg sidecar must be 
 
 ```
 ┌─────────────────────────── React (webview) ───────────────────────────┐
-│ onDragDropEvent ─► invoke("process_ffmpeg", {inputPath, args: HEVC})  │
-│ listen("ffmpeg-terminated") ─► processed++                            │
-│   processed == 1 ─► invoke("process_ffmpeg", {…, args: VP9})          │
-│   processed == 2 ─► show ✓, reset after 3 s                           │
+│ onDragDropEvent(drop) ─► queue = all dropped paths                    │
+│ for file in queue:                                                    │
+│   for preset in ["safari", "chrome"]:                                 │
+│     await invoke("encode", {inputPath, preset}) ─► output path / error│
+│ listen("encode-progress") ─► per-file progress bar                    │
 └──────────────────────────────────┬────────────────────────────────────┘
                                    │ Tauri IPC
 ┌──────────────────────────────────▼────────────── Rust (src-tauri) ────┐
-│ #[tauri::command] process_ffmpeg                                      │
-│   shell().sidecar("ffmpeg").args(["-i", input, …args]).spawn()        │
-│   async task streams CommandEvent:                                    │
-│     Stdout     ─► emit("ffmpeg-output")                               │
-│     Stderr     ─► emit("ffmpeg-error")     (FFmpeg logs to stderr)    │
-│     Error      ─► emit("ffmpeg-process-error")                        │
-│     Terminated ─► emit("ffmpeg-terminated", exit code)                │
+│ #[tauri::command] async encode(input_path, preset)                    │
+│   output = <dir>/<stem>-safari.mp4 | <stem>-chrome.webm               │
+│   sidecar("ffmpeg") -nostdin -y -progress pipe:1 -i input …preset     │
+│   stderr "Duration: …"      ─► total length                           │
+│   stdout "out_time_us=…"    ─► emit("encode-progress", percent)       │
+│   Terminated(0)             ─► Ok(output)                             │
+│   Terminated(≠0)            ─► delete partial file, Err(last log lines)│
 └───────────────────────────────────────────────────────────────────────┘
 ```
 
 - **Drag and drop** uses Tauri's native `getCurrentWebview().onDragDropEvent`, which gives real filesystem paths (an HTML drop event can't).
-- **`process_ffmpeg`** (in `src-tauri/src/lib.rs`) puts `-i <input>` in front of the args it receives, starts the sidecar, and returns straight away. Progress comes back as events, so the UI never blocks.
-- The frontend runs the **two encodes in sequence** by counting `ffmpeg-terminated` events.
+- **`encode`** (in `src-tauri/src/lib.rs`) is an async command that resolves only when FFmpeg exits. The webview can only pick a **preset** name; the actual FFmpeg arguments are fixed in Rust, so the UI can't be made to run arbitrary FFmpeg options.
+- The frontend simply `await`s each encode in turn, so files and presets run strictly one at a time.
 
 ## Encoding settings
 
-The exact arguments passed to FFmpeg (after `-i <input>`):
+Every run starts with `-hide_banner -nostdin -y -nostats -progress pipe:1 -i <input>`, followed by the preset:
 
 **Safari (HEVC + alpha) → `<name>-safari.mp4`**
 
+macOS (Apple VideoToolbox, hardware-accelerated):
+
 ```
--c:v libx265 -pix_fmt yuva420p -x265-params alpha=1 -tag:v hvc1 <name>-safari.mp4
+-c:v hevc_videotoolbox -allow_sw 1 -alpha_quality 0.75 -pix_fmt bgra -b:v 2M -tag:v hvc1 -c:a aac
+```
+
+Windows / Linux (libx265):
+
+```
+-c:v libx265 -pix_fmt yuva420p -x265-params alpha=1 -tag:v hvc1 -c:a aac
 ```
 
 | Flag | Why |
 | --- | --- |
-| `-c:v libx265` | H.265 / HEVC encoder |
-| `-pix_fmt yuva420p` | 4:2:0 chroma **plus an alpha plane** |
-| `-x265-params alpha=1` | Encode the alpha plane as an HEVC auxiliary layer |
+| `hevc_videotoolbox` + `-alpha_quality` | Apple's encoder writes HEVC-with-alpha natively. `allow_sw` falls back to software on Macs without an HEVC hardware encoder. |
+| `-pix_fmt yuva420p` / `bgra` | Keep an **alpha plane** going into the encoder |
+| `-x265-params alpha=1` | Encode alpha as an HEVC auxiliary layer (x265 ≥ 4.0 with alpha support) |
 | `-tag:v hvc1` | Apple players require the `hvc1` tag (not `hev1`) |
 
-**Chrome / Firefox / Android (VP9) → `<name>-chrome.webm`**
+**Chrome / Firefox / Android (VP9 + alpha) → `<name>-chrome.webm`**
 
 ```
--c:v libvpx-vp9 -b:v 1M -c:a libopus <name>-chrome.webm
+-c:v libvpx-vp9 -pix_fmt yuva420p -b:v 1M -c:a libopus
 ```
 
 | Flag | Why |
 | --- | --- |
-| `-c:v libvpx-vp9` | VP9 encoder. Picks `yuva420p` automatically when the source has alpha. |
+| `-pix_fmt yuva420p` | **Required for ProRes 4444.** It decodes to `yuva444p12le`, which libvpx refuses, and the encode fails. |
 | `-b:v 1M` | Target 1 Mbps. Good for UI-sized clips; raise it for full-screen footage. |
 | `-c:a libopus` | WebM-compatible audio |
 
-To change quality, edit the `args` arrays in `src/App.tsx`. For example, use `-crf 30 -b:v 0` for constant-quality VP9.
+To change quality, edit `Preset::codec_args` in `src-tauri/src/lib.rs`.
+
+### Tests
+
+```bash
+cd src-tauri
+cargo test                 # unit tests: output naming, timestamp parsing
+cargo test -- --ignored    # end-to-end: real FFmpeg on PATH encodes a generated
+                           # ProRes 4444 clip twice with the app's exact arguments
+                           # and checks the alpha plane survives in both outputs
+```
 
 ## Project structure
 
@@ -224,7 +245,7 @@ utils.alpha-encoder/
 │       ├── index.ts              # delay()
 │       └── progress-copy.ts      # rotating loading messages
 ├── src-tauri/                    # Rust / Tauri backend
-│   ├── src/lib.rs                # process_ffmpeg command + event streaming
+│   ├── src/lib.rs                # encode command, presets, progress parsing, tests
 │   ├── src/main.rs               # entry point
 │   ├── binaries/                 # FFmpeg sidecars (ffmpeg-<target-triple>)
 │   ├── capabilities/default.json # permissions: sidecar-only shell access
@@ -244,40 +265,33 @@ utils.alpha-encoder/
 
 ## Known limitations
 
-This is an early utility (v0.1.0). Things to know before relying on it:
-
-- **One file per drop.** Only the first dropped file is encoded. Others are listed but ignored.
-- **Output names assume a 4-character extension** such as `.mov` or `.mp4`. `clip.mov` becomes `clip-safari.mp4`, but `clip.webm` would become `clip.-safari.mp4`.
-- **Existing outputs aren't overwritten.** FFmpeg runs without `-y`, so if `<name>-safari.mp4` already exists it waits for a confirmation that never comes and the app stays on "Processing". Delete or rename old outputs first.
-- **Errors aren't shown in the UI.** FFmpeg output is only logged to the devtools console. A failed encode still counts as "finished".
-- **No progress percentage**: just the animation and messages.
-- **Only the Windows FFmpeg binary is committed.** macOS and Linux need you to add one.
+- **Sequential encoding.** Files are encoded one at a time (FFmpeg already uses all cores per encode).
+- **Fixed quality.** There are no quality presets in the UI yet; edit `Preset::codec_args` to change them.
+- **Only the Windows FFmpeg binary is committed.** macOS and Linux need you to add one (see [Bundling FFmpeg](#bundling-ffmpeg)).
 
 ## Troubleshooting
 
 | Symptom | Likely cause / fix |
 | --- | --- |
 | `tauri dev` fails with *"resource path `binaries/ffmpeg-<triple>` doesn't exist"* | Add the FFmpeg sidecar for your platform (see [Bundling FFmpeg](#bundling-ffmpeg)). |
-| Stuck on "Processing Media" forever | An output file already exists (see limitations), or FFmpeg failed. Open devtools (right-click → Inspect in dev builds) and check the `ffmpeg-error` logs. |
-| Safari output has a black background | FFmpeg/x265 is too old for `alpha=1` (needs x265 ≥ 4.0), or the source has no alpha channel. Check with `ffprobe` that the input `pix_fmt` contains an `a`, e.g. `yuva444p12le`. |
+| A file shows **Failed** | Hover it for FFmpeg's full message. Common causes: the input isn't a video, or the encoder is missing from your FFmpeg build. |
+| *"Loaded libx265 does not support alpha layer encoding"* (Windows/Linux) | Your x265 was built without alpha. Use an FFmpeg build with x265 ≥ 4.0 and `ENABLE_ALPHA`. |
+| Safari output has a black background | The source has no alpha channel. Check with `ffprobe` that the input `pix_fmt` contains an `a`, e.g. `yuva444p12le`. |
 | WebM isn't transparent | The source has no alpha, or your FFmpeg's libvpx was built without alpha support. |
 | macOS: "ffmpeg can't be opened because Apple cannot check it" | Clear quarantine: `xattr -d com.apple.quarantine src-tauri/binaries/ffmpeg-*`. |
 | Port 1420 already in use | Another Vite/Tauri dev server is running. Stop it, or change the port in both `vite.config.ts` and `tauri.conf.json`. |
 
 ## Roadmap
 
-- Batch queue for multiple files, with per-file status
-- Real progress bar (parse FFmpeg `time=` / use `-progress pipe:1`)
-- Surface FFmpeg errors and non-zero exit codes in the UI
 - Quality presets (Small / Balanced / High) and an optional output folder
-- Overwrite prompt (`-y` / `-n`) and safe output naming for any extension
+- Cancel button for a running batch
 - Signed macOS / Windows release builds through GitHub Actions
 
 ## Contributing
 
 1. Fork, then `git checkout -b feat/my-change`
 2. `npm install && npm run tauri dev`
-3. Keep the Rust side building (`cargo check` in `src-tauri/`) and the TypeScript side compiling (`npm run build`).
+3. Keep `cargo test` (and `cargo test -- --ignored` if you touch presets) passing in `src-tauri/`, and `npm run build` compiling.
 4. Test with a real alpha-channel clip, and confirm transparency in both Safari and Chrome.
 5. Open a PR with a short description, and a screen recording for UI changes.
 
